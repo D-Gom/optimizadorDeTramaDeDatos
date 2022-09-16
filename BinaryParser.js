@@ -26,37 +26,44 @@ class BinaryParser {
         let _object = {}
         
         // guarda la posición de inicio para los siguientes bytes
-        let offsetBuffer = 0;
+        let offsetBufferBits = 0;
 
-        // Controla que sea un objeto tipo Buffer
-        if ( Buffer.isBuffer(buffer) ) {
-            for (const [key, value] of Object.entries(format)) {
-                // Toma la cantidad de bytes del objeto actual
-                let bytsCurrent = (value.type == 'float' ? 4 : Math.ceil( Number(value.len / 8 ) ));
-    
-                if ( value.type == 'uint' ) {
-                    _object[value.tag] = buffer.readUIntBE(offsetBuffer, bytsCurrent);
-                    
-                } else if ( value.type == 'int' ) {
-                    _object[value.tag] = buffer.readIntBE(offsetBuffer, bytsCurrent);
-                    
-                } else if ( value.type == 'float' ) {
-                    _object[value.tag] = buffer.readFloatBE(offsetBuffer);
-    
-                } else if ( value.type == 'ascii' ) {
-                    _object[value.tag] = buffer.toString('ascii', offsetBuffer, offsetBuffer + bytsCurrent);
-                }
-    
-                // agrega los bytes actuales al offset
-                offsetBuffer += bytsCurrent;
+        for (const [key, value] of Object.entries(format)) {
+
+            // Toma la cantidad de bites del objeto actual
+            let bitsCurrent = (value.type == 'float' ? 32 : value.len );
+
+            let bits = buffer.slice(offsetBufferBits, offsetBufferBits + bitsCurrent)
+            // Transforma a bytes
+            let bytes = parseInt(bits, 2).toString(16).toUpperCase();
+            // Tomas la cantidad de bytes
+            let bytsCurrent = bytes.length/2;
+            // crea el buffer
+            let bufferTemp = Buffer.allocUnsafe(bytsCurrent);
+            bufferTemp = Buffer.from(bytes, 'hex');
+
+            if ( value.type == 'uint' ) {
+                _object[value.tag] = bufferTemp.readUIntBE(0,bytsCurrent);
+
+            } else if ( value.type == 'int' ) {
+                _object[value.tag] = bufferTemp.readIntBE(0, bytsCurrent);  
+
+            } else if ( value.type == 'float' ) {
+                _object[value.tag] = bufferTemp.readFloatBE(0);
+
+            } else if ( value.type == 'ascii' ) {
+                _object[value.tag] = bufferTemp.toString('ascii', 0, bytsCurrent);
+
             }
-            
-        } else {
-            _object['error'] = 'Se debe ingresar un objeto tipo "Buffer" para su decodificación.'
+
+            // agrega los bytes actuales al offset
+            offsetBufferBits += bitsCurrent;
         }
+            
         
         return _object
-    }   
+    }
+
     /**
     * Se le ingresa un objeto a codificar de forma binario y un arreglo de objetos con el formato de codificación a utilizar
     * </br>Devuelve los objetos codificados, en "size" el tamaño del buffer y en "buffer" los datos codificados
@@ -77,10 +84,7 @@ class BinaryParser {
           );
         
         //   Crea el buffer
-        let buffer = Buffer.alloc(lenByts);
-
-        // guarda la posición de inicio para los siguientes bytes
-        let offsetBuffer = 0;
+        let ArrayBits = [];
         
         // Recorre el formato dato y busca los valores de cada campo en _objeto
         for (const [key, value] of Object.entries(format)) {
@@ -97,7 +101,11 @@ class BinaryParser {
                     valor = 0; //Remplazar con valor de error
                 }
                 // coloca el valor en UINT BE con los parametros dados
-                buffer.writeUIntBE(valor, offsetBuffer, bytsCurrent);
+                let bufferTemp = Buffer.alloc(bytsCurrent);
+                bufferTemp.writeUIntBE(valor, 0, bytsCurrent);
+
+                let bits = split2Bits(bufferTemp, value.len)[0];
+                ArrayBits.push(bits)
                 
             } else if ( value.type == 'int' ) {
                 // Controla si es un numero
@@ -105,7 +113,11 @@ class BinaryParser {
                     valor = 0; //Remplazar con valor de error
                 }
                 // coloca el valor en INT BE con los parametros dados
-                buffer.writeIntBE(valor, offsetBuffer, bytsCurrent);
+                let bufferTemp = Buffer.alloc(bytsCurrent);
+                bufferTemp.writeIntBE(valor, 0, bytsCurrent);
+
+                let bits = split2Bits(bufferTemp, value.len)[0];
+                ArrayBits.push(bits)
                 
             } else if ( value.type == 'float' ) {
                 // Controla si es un numero
@@ -113,7 +125,11 @@ class BinaryParser {
                     valor = 0; //Remplazar con valor de error
                 }
                 // coloca el valor en Float BE con los parametros dados
-                buffer.writeFloatBE(valor, offsetBuffer);
+                let bufferTemp = Buffer.alloc(4);
+                bufferTemp.writeFloatBE(valor, 0);
+
+                let bits = split2Bits(bufferTemp, 32)[0];
+                ArrayBits.push(bits)
                 
             } else if ( value.type == 'ascii' ) {
                 // Controla que sea un string
@@ -123,17 +139,43 @@ class BinaryParser {
                 // coloca el valor en ascii con los parametros dados
                 // si el tamaño de ascii ingresado es mayor a los bytes asignados el texto se recortara a este tamaño
                 // si la cantidad de bytes asignada es mayor al tamaño del valor a asignar se completara con 00 estos bytes
-                buffer.write(valor, offsetBuffer, bytsCurrent, 'ascii')
+                let bufferTemp = Buffer.alloc(bytsCurrent);
+                bufferTemp.write(valor, 0, bytsCurrent, 'ascii')
+
+                let bits = split2Bits(bufferTemp, value.len)[0];
+                ArrayBits.push(bits)
 
             }
 
-            // agrega los bytes actuales al offset            
-            offsetBuffer += bytsCurrent;
 
         }
 
-        return { size: buffer.length, buffer: buffer };
+        let bitsPLanos = ArrayBits.flat().toString().replaceAll(',','')
+        return { size: bitsPLanos.length, buffer: bitsPLanos };
     }
+}
+
+function byte2bits(a)
+{
+    var tmp = "";
+    for(var i = 128; i >= 1; i /= 2)
+        tmp += a&i?'1':'0';
+    return tmp;
+}
+function split2Bits(a, n)
+{
+    var buff = "";
+    var b = [];
+    for(var i = 0; i < a.length; i++)
+    {
+        buff += byte2bits(a[i]);
+        while(buff.length >= n)
+        {
+            b.push(buff.substr(0, n));
+            buff = buff.substr(n);
+        }
+    }
+    return [b, buff];
 }
 
 module.exports = BinaryParser;
